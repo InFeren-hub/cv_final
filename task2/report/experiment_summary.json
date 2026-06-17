@@ -1,0 +1,31 @@
+{
+  "wandb_project": "https://wandb.ai/escan0r-fudan/calvin-act-val-curves",
+  "wandb_b_only": "https://wandb.ai/escan0r-fudan/calvin-act-val-curves/runs/87h3dw7h",
+  "wandb_joint_abc": "https://wandb.ai/escan0r-fudan/calvin-act-val-curves/runs/kzwrndpi",
+  "b_only": {
+    "final_step": 12000,
+    "final_train_loss": 0.2028126150369644,
+    "final_train_action_l1": 0.1999418884515762,
+    "final_val_loss": 0.2525614640326239,
+    "final_val_action_l1": 0.2519654696225188,
+    "checkpoint": "/root/autodl-tmp/cv_hw3_task2/outputs/act_b_only_bs64_valcurve_20260616_174028/checkpoints/012000/pretrained_model"
+  },
+  "joint_abc": {
+    "final_step": 12000,
+    "final_train_loss": 0.2354928395152092,
+    "final_train_action_l1": 0.2392992675304412,
+    "final_val_loss": 0.2566883865511045,
+    "final_val_action_l1": 0.2557562687434256,
+    "checkpoint": "/root/autodl-tmp/cv_hw3_task2/outputs/act_joint_abc_bs64_valcurve_20260616_180359/checkpoints/012000/pretrained_model"
+  },
+  "zero_shot_d": {
+    "frames_eval": 308928,
+    "batches": 4827,
+    "b_only_chunk_action_l1": 0.21535541641354705,
+    "joint_abc_chunk_action_l1": 0.17280196074908918,
+    "chunk_action_l1_improvement_percent": 19.759640306767327,
+    "b_only_first_action_l1": 0.15437700008029628,
+    "joint_abc_first_action_l1": 0.12692723743207807,
+    "first_action_l1_improvement_percent": 17.780992397792897
+  }
+}

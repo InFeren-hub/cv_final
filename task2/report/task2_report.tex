@@ -1,0 +1,253 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  urlcolor=blue!55!black,
+  citecolor=blue!55!black
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{LeRobot ACT on CALVIN}
+\rhead{Task 2 Report}
+\cfoot{\thepage}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+
+\newcommand{\figplaceholder}[2]{
+  \fbox{
+    \begin{minipage}[c][0.27\textheight][c]{0.92\linewidth}
+      \centering
+      \textbf{Figure placeholder}\\[0.5em]
+      #2\\[0.5em]
+      \footnotesize Expected file: \texttt{#1}
+    \end{minipage}
+  }
+}
+
+\newcommand{\maybeimage}[3]{
+  \IfFileExists{#1}{
+    \includegraphics[width=#2]{#1}
+  }{
+    \figplaceholder{#1}{#3}
+  }
+}
+
+\title{\textbf{基于 LeRobot ACT 的 CALVIN 跨环境泛化实验报告}}
+\author{姓名：\textbf{王浩源} \quad 学号：\textbf{24300720202}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent\textbf{项目与实验链接}
+\begin{itemize}[leftmargin=1.2em,itemsep=0.25em]
+  \item GitHub 仓库：\url{https://github.com/InFeren-hub/cv_final}
+  \item 模型权重网盘：\url{https://drive.google.com/file/d/14H8HYwJ4SKynrkCx36ngJ8cSX7DytoZK/view?usp=sharing}
+  \item WandB 项目：\url{https://wandb.ai/escan0r-fudan/calvin-act-val-curves}
+  \item B-only WandB run：\url{https://wandb.ai/escan0r-fudan/calvin-act-val-curves/runs/87h3dw7h}
+  \item A+B+C joint WandB run：\url{https://wandb.ai/escan0r-fudan/calvin-act-val-curves/runs/kzwrndpi}
+\end{itemize}
+
+\section{任务背景}
+机器人模仿学习通常需要从专家轨迹中学习从视觉观测到低层动作的映射。CALVIN 提供了多个桌面操作环境，不同环境在背景、桌面纹理、物体布局和视觉外观上存在差异，因此很适合用来评估视觉-动作策略在跨环境分布偏移下的泛化能力。本实验关注三个问题：其一，仅在单一环境 B 上训练的 ACT 策略能否学到稳定的基础操作能力；其二，将环境 A、B、C 混合作为训练集后，模型的收敛行为如何变化；其三，两种策略在完全未参与训练的环境 D 上进行 zero-shot 推理时，动作误差是否存在可解释差异。
+
+\section{数据集与任务设置}
+本实验使用 CALVIN 数据集中按环境划分的 A、B、C、D split。训练阶段分别构造两种训练集：
+\begin{itemize}[leftmargin=1.2em,itemsep=0.25em]
+  \item \textbf{B-only 基础策略：}仅使用环境 B 数据训练。为了记录验证曲线，将环境 B 中前 5500 个 episode 用作训练，其余 615 个 episode 用作验证。
+  \item \textbf{A+B+C 联合策略：}混合环境 A、B、C 数据训练。每个环境内部按 episode 切分，约 90\% 用作训练，约 10\% 用作验证。
+  \item \textbf{D zero-shot 测试：}环境 D 完全不参与训练，仅用于测试两个已训练模型的跨环境动作预测误差。
+\end{itemize}
+
+每条样本包含第三人称 RGB 图像、腕部相机 RGB 图像、机器人状态向量以及专家动作。模型输入为视觉观测与状态，输出为未来动作序列。环境 D 的评估共覆盖 308,928 帧，按 batch 推理 4,827 次。
+
+\section{方法}
+\subsection{ACT 策略}
+Action Chunking Transformer (ACT) 将策略输出从单步动作扩展为一段动作 chunk。给定当前观测 $o_t$，ACT 直接预测未来 $K$ 步动作：
+\begin{equation}
+  \hat{a}_{t:t+K-1} = \pi_\theta(o_t).
+\end{equation}
+相比逐帧预测动作，action chunking 能够让模型学习短时间尺度上的操作意图，并降低每一步视觉噪声对动作输出的直接影响。在跨环境视觉偏移下，如果单帧图像的纹理、光照或背景发生变化，chunk-level 预测仍可能通过时间结构保持更平滑的动作趋势。
+
+LeRobot 的 ACT 实现采用视觉编码器提取相机图像特征，并使用 Transformer 结构结合机器人状态生成动作序列。训练目标为行为克隆损失，主要项为动作 L1 loss，同时包含 ACT 变分结构中的 KL 正则项：
+\begin{equation}
+  \mathcal{L} = \left\|\hat{a}_{t:t+K-1} - a_{t:t+K-1}\right\|_1 + \beta \mathcal{L}_{KL}.
+\end{equation}
+本报告重点比较 total loss 与 Action L1 loss，因为 Action L1 直接反映预测动作与专家动作之间的偏差。
+
+\subsection{Zero-shot 评估指标}
+由于环境 D 未参与训练，本实验将两个模型直接部署到 D split 上进行推理，并以专家动作为参考计算动作误差。报告两个指标：
+\begin{itemize}[leftmargin=1.2em,itemsep=0.25em]
+  \item \textbf{Chunk-level Action L1：}比较预测动作 chunk 与专家动作 chunk 的平均 L1 误差。
+  \item \textbf{First-action L1：}仅比较 chunk 第一个动作与专家当前动作的 L1 误差，更接近闭环控制中当前 step 的动作质量。
+\end{itemize}
+两个指标均为越低越好。本实验采用动作误差作为 zero-shot 泛化指标。
+
+\section{实验设置}
+\begin{table}[h]
+\centering
+\caption{主要训练超参数与模型设置。两组实验除训练数据外保持一致。}
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+\textbf{项目} & \textbf{设置} \\
+\midrule
+Policy & LeRobot ACTPolicy \\
+Algorithm & Action Chunking Transformer (ACT) \\
+Observation & RGB front image + RGB wrist image + robot state \\
+Action space & 低维连续控制动作，维度为 7 \\
+Vision encoder & LeRobot ACT 默认视觉编码器设置 \\
+Transformer hidden dimension & 512 \\
+Transformer heads & 8 \\
+Encoder / Decoder layers & 4 / 1 \\
+Feed-forward dimension & 3200 \\
+Action chunk size & 64 \\
+Loss function & Action L1 loss + KL regularization \\
+Optimizer & AdamW \\
+Learning rate & $1\times 10^{-5}$ \\
+Batch size & 64 \\
+Training steps & 12,000 \\
+Validation interval & 每 1,000 steps 验证一次 \\
+Validation batches & 每次最多 128 batches \\
+Logging & WandB offline/online logging \\
+Checkpoint policy & 仅保存最终 checkpoint \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{训练结果}
+\subsection{收敛曲线}
+图 \ref{fig:train-curves} 展示了 B-only 与 A+B+C joint 两个策略的训练 loss 与训练 Action L1 曲线。B-only 的最终训练 loss 更低，这符合预期：单环境数据分布更集中，模型只需要拟合环境 B 的视觉外观和动作分布。A+B+C joint 需要同时覆盖三个环境的视觉变化，因此训练误差略高。
+
+\begin{figure}[h]
+\centering
+\begin{subfigure}{0.48\linewidth}
+  \centering
+  \maybeimage{../figures/fig_train_total_loss.png}{\linewidth}{Training total loss curve}
+  \caption{Train total loss}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\linewidth}
+  \centering
+  \maybeimage{../figures/fig_train_action_l1_loss.png}{\linewidth}{Training Action L1 loss curve}
+  \caption{Train Action L1 loss}
+\end{subfigure}
+\caption{B-only 与 A+B+C joint 的训练收敛曲线。}
+\label{fig:train-curves}
+\end{figure}
+
+图 \ref{fig:val-curves} 展示验证集上的 total loss 与 Action L1 曲线。两个模型均完成 12 个验证点记录。最终 B-only 在其 B 环境验证集上取得略低的验证误差；joint 模型验证误差更高，但其验证集覆盖 A、B、C 三种外观，因此该误差反映的是更复杂分布上的拟合难度。
+
+\begin{figure}[h]
+\centering
+\begin{subfigure}{0.48\linewidth}
+  \centering
+  \maybeimage{../figures/fig_validation_total_loss.png}{\linewidth}{Validation total loss curve}
+  \caption{Validation total loss}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\linewidth}
+  \centering
+  \maybeimage{../figures/fig_validation_action_l1_loss.png}{\linewidth}{Validation Action L1 loss curve}
+  \caption{Validation Action L1 loss}
+\end{subfigure}
+\caption{B-only 与 A+B+C joint 的验证集指标曲线。}
+\label{fig:val-curves}
+\end{figure}
+
+\subsection{关键指标}
+\begin{table}[h]
+\centering
+\caption{训练与验证最终指标。}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{模型} & \textbf{Final step} & \textbf{Train loss} & \textbf{Train Action L1} & \textbf{Val Action L1} \\
+\midrule
+B-only & 12,000 & 0.202813 & 0.199942 & 0.251965 \\
+A+B+C joint & 12,000 & 0.235493 & 0.239299 & 0.255756 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{环境 D Zero-shot 结果}
+两个模型在未见过的环境 D 上直接推理，不进行任何微调。表 \ref{tab:d-zero-shot} 给出动作误差结果，图 \ref{fig:d-bar} 给出可视化对比。
+
+\begin{table}[h]
+\centering
+\caption{环境 D zero-shot 动作误差，数值越低越好。}
+\label{tab:d-zero-shot}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{模型} & \textbf{Chunk Action L1} & \textbf{First-action L1} & \textbf{相对 B-only 改善} \\
+\midrule
+B-only & 0.215355 & 0.154377 & -- \\
+A+B+C joint & 0.172802 & 0.126927 & 19.76\% / 17.78\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\maybeimage{../figures/fig_zero_shot_d_action_error.png}{0.72\linewidth}{Zero-shot D action error comparison}
+\caption{环境 D 上的 zero-shot 动作误差对比。}
+\label{fig:d-bar}
+\end{figure}
+
+结果表明，虽然 A+B+C joint 在训练和验证阶段面对更复杂的数据分布而表现出略高的 supervised loss，但它在完全未见过的环境 D 上明显优于 B-only。chunk-level Action L1 降低 19.76\%，first-action L1 降低 17.78\%。这说明跨环境训练没有单纯追求某一环境的低拟合误差，而是提升了策略对视觉变化的容忍度。
+
+\section{现象分析}
+\subsection{单环境训练与多环境训练的收敛差异}
+B-only 的训练 loss 和 Action L1 更低，主要原因是环境 B 数据分布单一，视觉背景、物体外观和状态-动作对应关系更集中。模型参数可以更快适应该环境下的局部统计规律，因此收敛曲线更低、更稳定。相反，A+B+C joint 同时观察三个环境，输入图像中存在更多背景、纹理和布局差异；在相同步数与相同模型容量下，joint 模型需要用同一组参数解释更宽的视觉分布，因此训练误差较高是合理的。
+
+但是，较低的训练误差并不等同于更好的跨环境泛化。B-only 更容易学习到环境 B 中稳定但不可迁移的视觉线索，例如背景颜色、桌面纹理或特定相机外观。当测试环境切换到 D 时，这些线索发生偏移，导致动作预测误差上升。A+B+C joint 的训练难度更高，但它在训练中已经见过更多环境变化，因此更倾向于学习与任务相关的物体、机器人状态和动作关系，而不是依赖单一环境的外观特征。
+
+\subsection{Action Chunking 的跨环境鲁棒性}
+ACT 的核心机制是一次预测未来多步动作，而不是只预测当前单步动作。这种 action chunking 对跨环境视觉偏移有两方面帮助。第一，chunk 预测鼓励模型输出一段时间内连贯的操作计划，动作不完全受某一帧视觉噪声支配，因此在背景或纹理变化时输出更平滑。第二，多步监督为模型提供了更强的时序结构信号，使模型不仅拟合当前动作，还学习短期任务意图，例如接近、抓取、移动或释放等连续阶段。
+
+不过，action chunking 并不能完全消除视觉分布偏移。如果初始观测被错误编码，后续整个动作 chunk 都可能带有系统性偏差；并且较长 chunk 在真实闭环 rollout 中可能累积误差。因此，ACT 的鲁棒性依赖于视觉编码器是否能提取环境无关特征，也依赖于训练数据是否覆盖足够多的外观变化。本实验中 A+B+C joint 在 D 上表现更好，说明多环境训练与 action chunking 是互补的：前者提升视觉特征泛化，后者提升短时动作序列的一致性。
+
+\subsection{绝对效果评价}
+从绝对误差看，joint 模型在 D 环境的 first-action L1 为 0.1269，chunk-level L1 为 0.1728，说明其动作预测已经明显接近专家动作，但仍不能视为完美策略。动作误差指标只衡量离线专家轨迹上的预测偏差，不能完全替代真实环境 rollout 的任务成功率。若后续提供稳定的 CALVIN 在线仿真评估环境，应进一步报告 success rate，并检查长时任务链中是否存在由 action chunk 累积误差导致的失败案例。
+
+\section{结论}
+本实验完成了 LeRobot ACT 在 CALVIN 上的单环境训练、多环境联合训练与环境 D zero-shot 动作误差评估。B-only 模型在环境 B 相关验证集上取得略低的监督误差，但 A+B+C joint 模型在未见过的环境 D 上取得更低动作误差，chunk-level Action L1 相比 B-only 降低 19.76\%。这表明多环境数据能提升视觉分布偏移下的泛化能力，而 ACT 的 action chunking 机制通过预测连续动作片段增强了短时动作一致性。整体来看，多环境联合训练更适合作为跨环境部署的策略训练方案。
+
+\appendix
+\section{实验产物路径}
+\begin{itemize}[leftmargin=1.2em,itemsep=0.25em]
+  \item B-only final checkpoint: \texttt{/root/autodl-tmp/cv\_hw3\_task2/outputs/act\_b\_only\_bs64\_valcurve\_20260616\_174028/checkpoints/012000/pretrained\_model}
+  \item A+B+C joint final checkpoint: \texttt{/root/autodl-tmp/cv\_hw3\_task2/outputs/act\_joint\_abc\_bs64\_valcurve\_20260616\_180359/checkpoints/012000/pretrained\_model}
+  \item Training/validation plots: \texttt{/root/autodl-tmp/cv\_hw3\_task2/outputs/validation\_curve\_comparison}
+  \item Zero-shot D results: \texttt{/root/autodl-tmp/cv\_hw3\_task2/outputs/zero\_shot\_d}
+\end{itemize}
+
+\section{可复现实验命令}
+\begin{verbatim}
+# B-only ACT training with validation curve
+python src/train_act_calvin.py --mode b_only --batch-size 64 --steps 12000
+
+# A+B+C joint ACT training with validation curve
+python src/train_act_calvin.py --mode joint_abc --batch-size 64 --steps 12000
+
+# Zero-shot action-error evaluation on environment D
+python src/evaluate_zero_shot_d.py
+\end{verbatim}
+
+\end{document}
