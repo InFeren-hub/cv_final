@@ -1,0 +1,23 @@
+Task1 metrics export
+WandB offline directory: D:\计算机视觉HW3\task1\reports\metrics\wandb_offline
+
+[B_text_to_3D]
+event_wall_time_hours=9.70
+train/loss_sds=29396.4 @ step 4999
+train/loss_orient=0.0433148 @ step 4999
+train/loss_sparsity=0.20469 @ step 4999
+train/loss_opaque=0.0224475 @ step 4999
+
+[C_single_image]
+event_wall_time_hours=4.84
+train/loss_rgb=0.00319793 @ step 2999
+train/loss_mask=0.00691375 @ step 2999
+train/loss_sd=1391.11 @ step 2999
+train/loss_sd_3d=21.4422 @ step 2999
+
+[Garden_2DGS]
+event_wall_time_hours=0.66
+train_loss_patches/total_loss=0.072687 @ step 7000
+train_loss_patches/reg_loss=0.0356457 @ step 7000
+total_points=1.8682e+06 @ step 7000
+
